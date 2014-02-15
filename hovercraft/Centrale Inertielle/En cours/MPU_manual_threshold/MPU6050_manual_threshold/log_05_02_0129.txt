@@ -1,0 +1,159 @@
+WHO_AM_I : 68, error = 0
+PWR_MGMT_2 : 0, error = 0
+1100
+78
+8468
+27
+23
+-116
+0
+0
+0
+0
+0
+0
+OFFSET set u.u : 0.60
+Finished Init
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+On recule !!
+On avance !!
+On recule !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+On avance !!
+On recule !!
+On recule !!
+On avance !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+On recule !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+On recule !!
+On avance !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+On avance !!
+On recule !!
+Reading data, error=
+-11
+On recule !!
+On avance !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+On recule !!
+On avance !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+On avance !!
+Reading data, error=
+-11
+On recule !!
+On recule !!
+On recule !!
+On avance !!
+On avance !!
+On recule !!
+On recule !!
+On avance !!
+On avance !!
+On recule !!
+On avance !!
+On avance !!
+On recule !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+On recule !!
+On avance !!
+On avance !!
+On recule !!
+On avance !!
+On recule !!
+On avance !!
+On recule !!
+On avance !!
+On recule !!
+On avance !!
+On recule !!
+On avance !!
+Reading data, error=
+-11
+On recule !!
+On avance !!
+On recule !!
+On avance !!
+On recule !!
+On avance !!
+On recule !!
+On recule !!
+On avance !!
+Reading data, error=
+-11
+On avance !!
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11
+Reading data, error=
+-11

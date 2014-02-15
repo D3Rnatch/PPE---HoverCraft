@@ -1,0 +1,653 @@
+#include <Wire.h>
+#include <MPU_SETTINGS.h>
+
+bool blinkState = false;
+int error;
+uint8_t c;
+double dT;
+accel_t_gyro_union accel_t_gyro;
+uint8_t flag_calibration = 0;
+int offset[6] = { 0,0,0,0,0,0 };
+int i = 0;
+
+void setup()
+{
+  Wire.begin(); // Setup I2C pin com !
+  Serial.begin(9600);
+  // default at power-up:
+  //    Gyro at 250 degrees second
+  //    Acceleration at 2g
+  //    Clock source at internal 8MHz
+  //    The device is in sleep mode.
+
+  error = MPU6050_read (MPU6050_WHO_AM_I, &c, 1);
+  Serial.print(F("WHO_AM_I : "));
+  Serial.print(c,HEX);
+  Serial.print(F(", error = "));
+  Serial.println(error,DEC);
+
+  // According to the datasheet, the 'sleep' bit
+  // should read a '1'. But I read a '0'.
+  // That bit has to be cleared, since the sensor
+  // is in sleep mode at power-up. Even if the
+  // bit reads '0'.
+  error = MPU6050_read (MPU6050_PWR_MGMT_2, &c, 1);
+  Serial.print(F("PWR_MGMT_2 : "));
+  Serial.print(c,HEX);
+  Serial.print(F(", error = "));
+  Serial.println(error,DEC);
+
+  /* Interesting paragraph to keep*/
+  // Clear the 'sleep' bit to start the sensor.
+  MPU6050_write_reg (MPU6050_PWR_MGMT_1, 0);
+  
+  // Sensitivity Set to 16g and 2000°/s
+  MPU6050_write_reg (MPU6050_ACCEL_CONFIG, 8);
+  MPU6050_write_reg (MPU6050_GYRO_CONFIG, 8);
+  /*
+  // Interrupt Enabled On Treshold Motion Detection
+  MPU6050_write_reg ( MPU6050_INT_ENABLE, 64);
+
+  // Setting Threshold ACC/GYRO
+  MPU6050_write_reg ( MPU6050_MOT_THR, 1);
+
+  // Setting Threshold Reading Time
+  MPU6050_write_reg ( MPU6050_MOT_DUR, 1);
+  
+  // OFFSET CALCULATION AND SETTING */
+  delay(2000);
+  set_OFFSET();
+  
+  for(i=0;i<6;i++)
+    Serial.println(offset[i], DEC);
+    
+  Serial.println("OFFSET set u.u : 0.60");
+  Serial.println("Finished Init");
+}
+
+
+void loop()
+{
+  // Readings
+  error = MPU6050_read (MPU6050_ACCEL_XOUT_H, (uint8_t *) &accel_t_gyro, sizeof(accel_t_gyro));
+  if(error != 0){ 
+    Serial.println(F("Reading data, error=")); 
+    Serial.println(error,DEC);  
+  }
+
+    // On récupère les données */
+    uint8_t swap;
+    #define SWAP(x,y) swap = x; x = y; y = swap
+    SWAP (accel_t_gyro.reg.x_accel_h, accel_t_gyro.reg.x_accel_l);
+    SWAP (accel_t_gyro.reg.y_accel_h, accel_t_gyro.reg.y_accel_l);
+    SWAP (accel_t_gyro.reg.z_accel_h, accel_t_gyro.reg.z_accel_l);
+    SWAP (accel_t_gyro.reg.t_h, accel_t_gyro.reg.t_l);
+    SWAP (accel_t_gyro.reg.x_gyro_h, accel_t_gyro.reg.x_gyro_l);
+    SWAP (accel_t_gyro.reg.y_gyro_h, accel_t_gyro.reg.y_gyro_l);
+    SWAP (accel_t_gyro.reg.z_gyro_h, accel_t_gyro.reg.z_gyro_l);
+
+    // Une fois les données récupérés on réalise 
+    // le filtrage
+    int data = 0;
+    filter_threshold_v2(&data, offset, 0.90);
+    Serial.println(data,BIN);
+    if(data != 0) show_moves(data);
+    
+    delay(10);
+}
+
+void show_moves(int data)
+{ 
+ if(6144&data){ Serial.print("ACCEL_X CHANGE : "); Serial.println(accel_t_gyro.value.x_accel,DEC);}
+ if(1536&data){ Serial.print("ACCEL_Y CHANGE : "); Serial.println(accel_t_gyro.value.y_accel,DEC);}
+ if(384&data){ Serial.print("ACCEL_Z CHANGE : "); Serial.println(accel_t_gyro.value.z_accel,DEC);}
+ if(96&data){ Serial.print("Gyro_Z CHANGE : "); Serial.println(accel_t_gyro.value.z_gyro,DEC);}
+ if(24&data){ Serial.print("Gyro_Y CHANGE : "); Serial.println(accel_t_gyro.value.y_gyro,DEC);}
+ if(6&data){ Serial.print("Gyro_X CHANGE : "); Serial.println(accel_t_gyro.value.x_gyro,DEC);}
+}
+//--------------------------------------------------------------
+// Tests Every Data : GYRO & ACCEL
+// DATA CODE :
+// 0000    0000          0000           0000
+// ----    ACCEL     ACCEL/GYRO         GYRO
+// ---- X/Xneg/Y/Yneg Z/Zneg|Z/Zneg  Y/Yneg/X/Xneg
+// offset[] represents the 0 values at start
+// precision 
+void filter_threshold(int *data, int offset[], float precision)
+{
+  float result = 0.0;
+  *data = 0; // Value returned when nothing is working :D
+  result = offset[0]/accel_t_gyro.value.x_accel;
+  result = fabs(result);
+  if((result < 1 - precision || result > 1 + precision)){
+     if( accel_t_gyro.value.x_accel > 0) *data = *data | 4096;
+     if( accel_t_gyro.value.x_accel < 0) *data = *data | 2048;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[0], DEC);
+     Serial.print("And a result : ");
+     Serial.println(result,DEC);
+  }
+  result = offset[1]/accel_t_gyro.value.y_accel;
+  result = fabs(result);
+  if(result < 1 - precision || result > 1 + precision){
+     if( accel_t_gyro.value.y_accel > 0) *data = *data | 1024;
+     if( accel_t_gyro.value.y_accel < 0) *data = *data | 512;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[1], DEC);
+     Serial.print("And a result : ");
+     Serial.println(result,DEC);
+  }
+  /*
+  result = offset[2]/accel_t_gyro.value.z_accel;
+  result = fabs(result);
+  if(result < 1 - precision || result > 1 + precision){
+     if( accel_t_gyro.value.z_accel > 0) *data = *data | 256;
+     if( accel_t_gyro.value.z_accel < 0) *data = *data | 128;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[2], DEC);
+     Serial.print("And a result : ");
+     Serial.println(result,DEC);
+  }
+  result = offset[3]/accel_t_gyro.value.z_gyro;
+  result = fabs(result);
+  if(result < 1 - precision || result > 1 + precision){
+     if( accel_t_gyro.value.z_gyro > 0) *data = *data | 64;
+     if( accel_t_gyro.value.z_gyro < 0) *data = *data | 32;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[3], DEC);
+     Serial.print("And a result : ");
+     Serial.println(result,DEC);
+  } */
+  
+  result = offset[4]/accel_t_gyro.value.y_gyro;  
+  result = fabs(result);
+  if(result < 1 - precision || result > 1 + precision){
+     if( accel_t_gyro.value.y_gyro > 0) *data = *data | 16;
+     if( accel_t_gyro.value.y_gyro < 0) *data = *data | 8;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[4], DEC);
+     Serial.print("And a result : ");
+     Serial.println(result,DEC);
+  }
+  result = offset[5]/accel_t_gyro.value.x_gyro;
+  result = fabs(result);
+  if(result < 1 - precision || result > 1 + precision){
+     if( accel_t_gyro.value.x_gyro > 0) *data = *data | 4;
+     if( accel_t_gyro.value.x_gyro < 0) *data = *data | 2;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[5], DEC);
+     Serial.print("And a result : ");
+     Serial.println(result,DEC);
+  }
+}
+
+void filter_threshold_v4(int *data, int offset[], float precision)
+{
+  int max_val = 0;
+  int min_val = 0;  
+
+  if(offset[0] > 0)
+  {
+    max_val = offset[0] + offset[0];
+    min_val = offset[0] - offset[0];
+  }
+  else{
+    min_val = offset[0] + offset[0];
+    max_val = offset[0] - offset[0];
+  }
+  if(accel_t_gyro.value.x_accel >= max_val || accel_t_gyro.value.x_accel <= min_val)
+  {
+     if( accel_t_gyro.value.x_accel > 0) *data = *data | 0b0001000000000000;
+     if( accel_t_gyro.value.x_accel < 0) *data = *data | 0b0000100000000000;
+     Serial.print("For a data of 0b0001000000000000 or 0b0000100000000000");
+     Serial.println(*data, DEC);
+  }
+  if(offset[1] > 0)
+  {
+    max_val = offset[1] + offset[1];
+    min_val = offset[1] - offset[1];
+  }
+  else{
+    min_val = offset[1] + offset[1];
+    max_val = offset[1] - offset[1];
+  }
+  if(accel_t_gyro.value.y_accel >= max_val || accel_t_gyro.value.y_accel <= min_val)
+  {
+     if( accel_t_gyro.value.y_accel > 0) *data = *data | 0b0000010000000000;
+     if( accel_t_gyro.value.y_accel < 0) *data = *data | 0b0000001000000000;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[1], DEC);
+  }
+  if(offset[2] > 0)
+  {
+    max_val = offset[2] + offset[2];
+    min_val = offset[2] - offset[2];
+  }
+  else{
+    min_val = offset[2] + offset[2];
+    max_val = offset[2] - offset[2];
+  }
+  if(accel_t_gyro.value.z_accel >= max_val || accel_t_gyro.value.z_accel <= min_val)
+  {
+     if( accel_t_gyro.value.z_accel > 0) *data = *data | 0b0000000100000000;
+     if( accel_t_gyro.value.z_accel < 0) *data = *data | 0b0000000010000000;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[2], DEC);
+  }
+  
+  if(offset[3] > 0)
+  {
+    max_val = offset[3] + offset[3];
+    min_val = offset[3] - offset[3];
+  }
+  else{
+    min_val = offset[3] + offset[3];
+    max_val = offset[3] - offset[3];
+  }
+  if(accel_t_gyro.value.z_gyro >= max_val || accel_t_gyro.value.z_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.z_gyro > 0) *data = *data | 0b0000000001000000;
+     if( accel_t_gyro.value.z_gyro < 0) *data = *data | 0b0000000000100000;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[3], DEC);
+  }
+  
+  if(offset[4] > 0)
+  {
+    max_val = offset[4] + offset[4];
+    min_val = offset[4] - offset[4];
+  }
+  else{
+    min_val = offset[4] + offset[4];
+    max_val = offset[4] - offset[4];
+  }
+  
+  if(accel_t_gyro.value.y_gyro >= max_val || accel_t_gyro.value.y_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.y_gyro > 0) *data = *data | 0b0000000000010000;
+     if( accel_t_gyro.value.y_gyro < 0) *data = *data | 0b0000000000001000;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[4], DEC);
+  }
+  
+  if(offset[5] > 0)
+  {
+    max_val = offset[5] + offset[5];
+    min_val = offset[5] - offset[5];
+  }
+  else{
+    min_val = offset[5] + offset[5];
+    max_val = offset[5] - offset[5];
+  }
+  
+  if(accel_t_gyro.value.x_gyro >= max_val || accel_t_gyro.value.x_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.x_gyro > 0) *data = *data | 0b0000000000000100;
+     if( accel_t_gyro.value.x_gyro < 0) *data = *data | 0b0000000000000010;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[5], DEC);
+  }
+}
+
+//--------------------------------------------------------------
+// Tests Every Data : GYRO & ACCEL
+// DATA CODE :
+// 0000    0000          0000           0000
+// ----    ACCEL     ACCEL/GYRO         GYRO
+// ---- X/Xneg/Y/Yneg Z/Zneg|Z/Zneg  Y/Yneg/X/Xneg
+// offset[] represents the 0 values at start
+// precision
+void filter_threshold_v3(int *data, int offset[], float precision)
+{
+  int max_val = 0;
+  int min_val = 0;
+  int i = precision * 1000;
+  int result = 0;
+  
+  if(offset[0] > 0)
+  {
+    max_val = offset[0] + offset[0] * i;
+    min_val = offset[0] - offset[0] * i;
+  }
+  else{
+    min_val = offset[0] + offset[0] * i;
+    max_val = offset[0] - offset[0] * i;
+  }
+  if(accel_t_gyro.value.x_accel >= max_val || accel_t_gyro.value.x_accel <= min_val)
+  {
+     if( accel_t_gyro.value.x_accel > 0) *data = *data | 0b0000100000000000;
+     if( accel_t_gyro.value.x_accel < 0) *data = *data | 0b0000010000000000;
+     Serial.print("For a max_val of : ");
+     Serial.println(max_val, DEC);
+  }
+  if(offset[1] > 0)
+  {
+    max_val = offset[1] + offset[1]*i;
+    min_val = offset[1] - offset[1] * i;
+  }
+  else{
+    min_val = offset[1] + offset[1]*i;
+    max_val = offset[1] - offset[1] * i;
+  }
+  if(accel_t_gyro.value.y_accel >= max_val || accel_t_gyro.value.y_accel <= min_val)
+  {
+     if( accel_t_gyro.value.y_accel > 0) *data = *data | 0b0000001000000000;
+     if( accel_t_gyro.value.y_accel < 0) *data = *data | 0b0000000100000000;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[1], DEC);
+  }
+  if(offset[2] > 0)
+  {
+    max_val = offset[2] + offset[2]*i;
+    min_val = offset[2] - offset[2] * i;
+  }
+  else{
+    min_val = offset[2] + offset[2]*i;
+    max_val = offset[2] - offset[2] * i;
+  }
+  if(accel_t_gyro.value.z_accel >= max_val || accel_t_gyro.value.z_accel <= min_val)
+  {
+     if( accel_t_gyro.value.z_accel > 0) *data = *data | 0b0000000010000000;
+     if( accel_t_gyro.value.z_accel < 0) *data = *data | 0b0000000001000000;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[2], DEC);
+  }
+  
+  if(offset[3] > 0)
+  {
+    max_val = offset[3] + offset[3] * i;
+    min_val = offset[3] - offset[3] * i;
+  }
+  else{
+    min_val = offset[3] + offset[3]*i;
+    max_val = offset[3] - offset[3] * i;
+  }
+  if(accel_t_gyro.value.z_gyro >= max_val || accel_t_gyro.value.z_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.z_gyro > 0) *data = *data | 0b0000000000100000;
+     if( accel_t_gyro.value.z_gyro < 0) *data = *data | 0b0000000000010000;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[3], DEC);
+  }
+  
+  if(offset[4] > 0)
+  {
+    max_val = offset[4] + offset[4]*i;
+    min_val = offset[4] - offset[4] * i;
+  }
+  else
+  {
+    min_val = offset[4] + offset[4]*i;
+    max_val = offset[4] - offset[4] * i;
+  }
+  
+  if(accel_t_gyro.value.y_gyro >= max_val || accel_t_gyro.value.y_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.y_gyro > 0) *data = *data | 0b0000000000001000;
+     if( accel_t_gyro.value.y_gyro < 0) *data = *data | 0b0000000000000100;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[4], DEC);
+  }
+  
+  if(offset[5] > 0)
+  {
+    max_val = offset[5] + offset[5]*i;
+    min_val = offset[5] - offset[5] * i;
+  }
+  else{
+    min_val = offset[5] + offset[5]*i;
+    max_val = offset[5] - offset[5] * i;
+  }
+  
+  if(accel_t_gyro.value.x_gyro >= max_val || accel_t_gyro.value.x_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.x_gyro > 0) *data = *data | 0b0000000000000010;
+     if( accel_t_gyro.value.x_gyro < 0) *data = *data | 0b0000000000000001;
+     Serial.print("For an offset of : ");
+     Serial.println(offset[5], DEC);
+  }
+  
+}
+
+//--------------------------------------------------------------
+// Tests Every Data : GYRO & ACCEL
+// DATA CODE :
+// 0000    0000          0000           0000
+// ----    ACCEL     ACCEL/GYRO         GYRO
+// ---- X/Xneg/Y/Yneg Z/Zneg|Z/Zneg  Y/Yneg/X/Xneg
+// offset[] represents the 0 values at start
+// precision 
+void filter_threshold_v2(int *data, int offset[], float precision)
+{
+  int max_val = 0;
+  int min_val = 0;
+  max_val = offset[0] + precision*offset[0];
+  min_val = offset[0] - precision*offset[0];
+  Serial.println(max_val,DEC);
+  Serial.println(min_val,DEC);
+  if(accel_t_gyro.value.x_accel >= max_val || accel_t_gyro.value.x_accel <= min_val)
+  {
+     if( accel_t_gyro.value.x_accel > 0) *data = *data | 0b0001000000000000;
+     if( accel_t_gyro.value.x_accel < 0) *data = *data | 0b0000100000000000;
+     /*Serial.print("For a max_val of : ");
+     Serial.println(max_val, DEC);*/
+  }
+  
+  max_val = offset[1] + precision*offset[1];
+  min_val = offset[1] - precision*offset[1];
+  Serial.println(max_val,DEC);
+  Serial.println(min_val,DEC);
+  if(accel_t_gyro.value.y_accel >= max_val || accel_t_gyro.value.y_accel <= min_val)
+  {
+     if( accel_t_gyro.value.y_accel > 0) *data = *data | 0b0000010000000000;
+     if( accel_t_gyro.value.y_accel < 0) *data = *data | 0b0000001000000000;
+     /*Serial.print("For a max_val of : ");
+     Serial.println(max_val, DEC);*/
+  }
+  /*
+  max_val = offset[2] + precision*offset[2];
+  min_val = offset[2] - precision*offset[2];
+  if(accel_t_gyro.value.z_accel >= max_val || accel_t_gyro.value.z_accel <= min_val)
+  {
+     
+     Serial.println("");
+     
+     if( accel_t_gyro.value.z_accel > 0) *data = *data | 0b0000000100000000;
+     if( accel_t_gyro.value.z_accel < 0) *data = *data | 0b0000000010000000;
+     /*Serial.print("For a max_val of : ");
+     Serial.println(max_val, DEC);*/
+  // }
+  
+  /*
+  max_val = offset[3] + precision*offset[3];
+  min_val = offset[3] - precision*offset[3];
+  if(accel_t_gyro.value.z_gyro >= max_val || accel_t_gyro.value.z_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.z_gyro > 0) *data = *data | 0b0000000001000000;
+     if( accel_t_gyro.value.z_gyro < 0) *data = *data | 0b0000000000100000;
+     /*Serial.print("For a max_val of : ");
+     Serial.println(max_val, DEC);*/
+  // }*/
+  
+  max_val = offset[4] + precision*offset[4];
+  min_val = offset[4] - precision*offset[4];
+  Serial.println(max_val,DEC);
+  Serial.println(min_val,DEC);
+  if(accel_t_gyro.value.y_gyro >= max_val || accel_t_gyro.value.y_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.y_gyro > 0) *data = *data | 0b0000000000010000;
+     if( accel_t_gyro.value.y_gyro < 0) *data = *data | 0b0000000000001000;
+     /*Serial.print("For a max_val of : ");
+     Serial.println(max_val, DEC);*/
+  }
+  
+  max_val = offset[5] + precision*offset[5];
+  min_val = offset[5] - precision*offset[5];
+  Serial.println(max_val,DEC);
+  Serial.println(min_val,DEC);
+  if(accel_t_gyro.value.x_gyro >= max_val || accel_t_gyro.value.x_gyro <= min_val)
+  {
+     if( accel_t_gyro.value.x_gyro > 0) *data = *data | 0b0000000000000100;
+     if( accel_t_gyro.value.x_gyro < 0) *data = *data | 0b0000000000000010;
+     /* Serial.print("For a max_val of : ");
+     Serial.println(max_val, DEC); */
+  }
+  
+}
+
+
+
+void set_OFFSET()
+{
+  // Reading data
+  error = MPU6050_read (MPU6050_ACCEL_XOUT_H, (uint8_t *) &accel_t_gyro, sizeof(accel_t_gyro));
+  if(error != 0){ 
+    Serial.println(F("Reading data, error=")); 
+    Serial.println(error,DEC);  
+  }
+  
+  // Swapping moment
+  uint8_t swap;
+    #define SWAP(x,y) swap = x; x = y; y = swap
+    SWAP (accel_t_gyro.reg.x_accel_h, accel_t_gyro.reg.x_accel_l);
+    SWAP (accel_t_gyro.reg.y_accel_h, accel_t_gyro.reg.y_accel_l);
+    SWAP (accel_t_gyro.reg.z_accel_h, accel_t_gyro.reg.z_accel_l);
+    SWAP (accel_t_gyro.reg.t_h, accel_t_gyro.reg.t_l);
+    SWAP (accel_t_gyro.reg.x_gyro_h, accel_t_gyro.reg.x_gyro_l);
+    SWAP (accel_t_gyro.reg.y_gyro_h, accel_t_gyro.reg.y_gyro_l);
+    SWAP (accel_t_gyro.reg.z_gyro_h, accel_t_gyro.reg.z_gyro_l);
+    
+  // Taking values for 0 origin
+  offset[0] = accel_t_gyro.value.x_accel;
+  offset[1] = accel_t_gyro.value.y_accel;
+  offset[2] = accel_t_gyro.value.z_accel;
+  offset[3] = accel_t_gyro.value.x_gyro;
+  offset[4] = accel_t_gyro.value.y_gyro;
+  offset[5] = accel_t_gyro.value.z_gyro;
+  
+  Serial.println(accel_t_gyro.value.x_accel,DEC);
+  Serial.println(offset[0], DEC);
+}
+
+int * set_MEAN_OFFSET()
+{
+ // NOT IMPLEMENTED YET 
+}
+
+// --------------------------------------------------------
+// MPU6050_read
+//
+// This is a common function to read multiple bytes
+// from an I2C device.
+//
+// It uses the boolean parameter for Wire.endTransMission()
+// to be able to hold or release the I2C-bus.
+// This is implemented in Arduino 1.0.1.
+//
+// Only this function is used to read.
+// There is no function for a single byte.
+//
+int MPU6050_read(int start, uint8_t *buffer, int size)
+{
+  int i, n, error;
+
+  Wire.beginTransmission(MPU6050_I2C_ADDRESS);
+  n = Wire.write(start);
+  if (n != 1)
+    return (-10);
+
+  n = Wire.endTransmission(false);    // hold the I2C-bus
+  if (n != 0)
+    return (n);
+
+  // Third parameter is true: relase I2C-bus after data is read.
+  Wire.requestFrom(MPU6050_I2C_ADDRESS, size, true);
+  i = 0;
+  while(Wire.available() && i<size)
+  {
+    buffer[i++]=Wire.read();
+  }
+  if ( i != size)
+    return (-11);
+
+  return (0);  // return : no error
+}
+
+int MPU6050_read_reg(int reg, uint8_t *data)
+{
+  int error;
+
+  error = MPU6050_read(reg, data, 1);
+
+  return error; 
+}
+
+//--------------------------------------------
+// CHECKS IF MOTION THRESHOLD HAS BEEN PASSED
+// 
+/*
+int MPU6050_check_motion_treshold(uint8_t * t){
+  uint8_t data = 0;
+  int error;
+  error = MPU6050_read_reg(MPU6050_INT_STATUS,&data);
+
+  *t = data & 0b01000000; 
+
+  return error; 
+}*/
+
+// --------------------------------------------------------
+// MPU6050_write
+//
+// This is a common function to write multiple bytes to an I2C device.
+//
+// If only a single register is written,
+// use the function MPU_6050_write_reg().
+//
+// Parameters:
+//   start : Start address, use a define for the register
+//   pData : A pointer to the data to write.
+//   size  : The number of bytes to write.
+//
+// If only a single register is written, a pointer
+// to the data has to be used, and the size is
+// a single byte:
+//   int data = 0;        // the data to write
+//   MPU6050_write (MPU6050_PWR_MGMT_1, &c, 1);
+//
+int MPU6050_write(int start, const uint8_t *pData, int size)
+{
+  int n, error;
+
+  Wire.beginTransmission(MPU6050_I2C_ADDRESS);
+  n = Wire.write(start);        // write the start address
+  if (n != 1)
+    return (-20);
+
+  n = Wire.write(pData, size);  // write data bytes
+  if (n != size)
+    return (-21);
+
+  error = Wire.endTransmission(true); // release the I2C-bus
+  if (error != 0)
+    return (error);
+
+  return (0);         // return : no error
+}
+
+// --------------------------------------------------------
+// MPU6050_write_reg
+//
+// An extra function to write a single register.
+// It is just a wrapper around the MPU_6050_write()
+// function, and it is only a convenient function
+// to make it easier to write a single register.
+//
+int MPU6050_write_reg(int reg, uint8_t data)
+{
+  int error;
+
+  error = MPU6050_write(reg, &data, 1);
+
+  return (error);
+}
